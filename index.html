@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+    <title>金魚場巡視 · 池況記錄與對照圖系統</title>
+    <meta name="theme-color" content="#ea580c"/>
+    <meta name="mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+    <meta name="apple-mobile-web-app-title" content="金魚場巡視"/>
+    <meta name="description" content="金魚場全場真實對照地圖、池況分類、品種與死魚紀錄、網籃籠養標記"/>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#fff7ed',
+                            100: '#ffedd5',
+                            500: '#f97316',
+                            600: '#ea580c',
+                            700: '#c2410c',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Alpine.js for reactivity -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js for stats -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <style>
+        .custom-scrollbar::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        [x-cloak] { display: none !important; }
+        
+        /* Blueprint Map Custom Grid Layouts */
+        .pond-btn {
+            transition: all 0.15s ease-in-out;
+            user-select: none;
+        }
+        .pond-btn:active {
+            transform: scale(0.92);
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen flex flex-col font-sans" x-data="goldfishApp()" x-init="initApp()">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-40 bg-gradient-to-r from-orange-600 via-amber-600 to-teal-700 text-white shadow-md">
+        <div class="mx-auto flex max-w-[1600px] items-center justify-between px-3 py-2.5">
+            <div class="flex items-center gap-2">
+                <div class="rounded-lg bg-white/20 p-2 backdrop-blur-sm flex items-center justify-center">
+                    <i data-lucide="fish" class="h-6 w-6 text-amber-200"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold leading-tight md:text-lg flex items-center gap-2">
+                        金魚場全場巡視系統
+                        <span class="text-[10px] bg-amber-400/30 text-amber-100 px-2 py-0.5 rounded-full font-normal hidden sm:inline-block">實景圖紙對照版 V3.0</span>
+                    </h1>
+                    <p class="hidden text-[11px] text-orange-100/90 sm:block">完全照場地現場排版 (F/G/H/I/倉庫/丙/乙/E/D/C/A/a小/桶/甲)</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2 text-xs">
+                <div class="bg-black/20 p-1 rounded-lg flex gap-1">
+                    <button @click="viewMode = 'blueprint'" :class="viewMode === 'blueprint' ? 'bg-white text-slate-800 font-bold shadow' : 'text-white hover:bg-white/10'" class="px-2.5 py-1 rounded-md transition flex items-center gap-1 text-[11px]">
+                        <i data-lucide="map" class="h-3.5 w-3.5"></i>
+                        <span>平面圖視角</span>
+                    </button>
+                    <button @click="viewMode = 'grid'" :class="viewMode === 'grid' ? 'bg-white text-slate-800 font-bold shadow' : 'text-white hover:bg-white/10'" class="px-2.5 py-1 rounded-md transition flex items-center gap-1 text-[11px]">
+                        <i data-lucide="layout-grid" class="h-3.5 w-3.5"></i>
+                        <span>區域列表</span>
+                    </button>
+                </div>
+
+                <button @click="openQuickBatchModal()" class="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 font-semibold text-white shadow hover:bg-emerald-500 transition active:scale-95">
+                    <i data-lucide="zap" class="h-4 w-4"></i>
+                    <span class="hidden md:inline">逐池巡邏</span>
+                </button>
+
+                <div class="relative" x-data="{ openExport: false }">
+                    <button @click="openExport = !openExport" class="flex items-center gap-1 rounded-lg bg-white/20 px-2.5 py-1.5 font-medium transition hover:bg-white/30">
+                        <i data-lucide="download" class="h-4 w-4"></i>
+                        <span class="hidden sm:inline">匯出</span>
+                    </button>
+                    <div x-show="openExport" @click.outside="openExport = false" x-cloak class="absolute right-0 mt-1 w-36 rounded-lg bg-white p-1 text-slate-700 shadow-xl border border-slate-200 z-50">
+                        <button @click="exportCSV(); openExport=false" class="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-100 rounded flex items-center gap-1.5">
+                            <i data-lucide="file-spreadsheet" class="h-3.5 w-3.5 text-emerald-600"></i> 匯出 CSV 檔
+                        </button>
+                        <button @click="exportJSON(); openExport=false" class="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-100 rounded flex items-center gap-1.5">
+                            <i data-lucide="file-json" class="h-3.5 w-3.5 text-blue-600"></i> 匯出 JSON 備份
+                        </button>
+                    </div>
+                </div>
+
+                <button @click="openModalForNewOrBatch()" class="flex items-center gap-1 rounded-lg bg-amber-400 px-3 py-1.5 font-bold text-orange-950 shadow transition hover:bg-amber-300 active:scale-95">
+                    <i data-lucide="plus" class="h-4 w-4"></i>
+                    <span>填報</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Stats Bar -->
+    <section class="border-b border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <div class="mx-auto grid max-w-[1600px] grid-cols-3 gap-1.5 text-center text-xs md:grid-cols-7">
+            <button @click="selectedStatusFilter = 'ALL'" :class="selectedStatusFilter === 'ALL' ? 'ring-2 ring-slate-400 bg-slate-100' : 'bg-slate-50 border-slate-200'" class="rounded-lg border p-1.5 text-slate-800 transition hover:bg-slate-100">
+                <div class="text-[10px] font-medium opacity-80">全場池數</div>
+                <div class="text-sm font-bold" x-text="totalPondsCount">253</div>
+            </button>
+            <button @click="toggleStatusFilter('NORMAL')" :class="selectedStatusFilter === 'NORMAL' ? 'ring-2 ring-emerald-500 bg-emerald-100' : 'bg-emerald-50 border-emerald-200 text-emerald-800'" class="rounded-lg border p-1.5 transition hover:bg-emerald-100">
+                <div class="text-[10px] font-medium opacity-80">🟢 正常養殖</div>
+                <div class="text-sm font-bold" x-text="stats.NORMAL || 0">0</div>
+            </button>
+            <button @click="toggleStatusFilter('BASKET')" :class="selectedStatusFilter === 'BASKET' ? 'ring-2 ring-purple-500 bg-purple-100' : 'bg-purple-50 border-purple-200 text-purple-800'" class="rounded-lg border p-1.5 transition hover:bg-purple-100">
+                <div class="text-[10px] font-medium opacity-80">🟣 籃子有魚</div>
+                <div class="text-sm font-bold" x-text="stats.BASKET || 0">0</div>
+            </button>
+            <button @click="toggleStatusFilter('EMPTY_WATER')" :class="selectedStatusFilter === 'EMPTY_WATER' ? 'ring-2 ring-sky-500 bg-sky-100' : 'bg-sky-50 border-sky-200 text-sky-800'" class="rounded-lg border p-1.5 transition hover:bg-sky-100">
+                <div class="text-[10px] font-medium opacity-80">🔵 空池有水</div>
+                <div class="text-sm font-bold" x-text="stats.EMPTY_WATER || 0">0</div>
+            </button>
+            <button @click="toggleStatusFilter('EMPTY_NO_WATER')" :class="selectedStatusFilter === 'EMPTY_NO_WATER' ? 'ring-2 ring-stone-400 bg-stone-100' : 'bg-stone-50 border-stone-200 text-stone-800'" class="rounded-lg border p-1.5 transition hover:bg-stone-100">
+                <div class="text-[10px] font-medium opacity-80">⚪ 空池無水</div>
+                <div class="text-sm font-bold" x-text="stats.EMPTY_NO_WATER || 0">0</div>
+            </button>
+            <button @click="toggleStatusFilter('WARNING')" :class="selectedStatusFilter === 'WARNING' ? 'ring-2 ring-amber-500 bg-amber-100' : 'bg-amber-50 border-amber-200 text-amber-800'" class="rounded-lg border p-1.5 transition hover:bg-amber-100">
+                <div class="text-[10px] font-medium opacity-80">🟡 警戒/🔴 異常</div>
+                <div class="text-sm font-bold" x-text="(stats.WARNING || 0) + (stats.DANGER || 0)">0</div>
+            </button>
+            <button @click="openDeadFishModal()" class="rounded-lg border p-1.5 bg-rose-50 border-rose-200 text-rose-700 transition hover:bg-rose-100 col-span-3 md:col-span-1">
+                <div class="text-[10px] font-medium opacity-80">💀 今日死魚</div>
+                <div class="text-sm font-bold">
+                    <span x-text="totalDeadFishToday">0</span>
+                    <span class="text-[10px] font-normal">尾</span>
+                </div>
+            </button>
+        </div>
+    </section>
+
+    <!-- Main Content Area -->
+    <main class="mx-auto grid w-full max-w-[1600px] flex-1 grid-cols-1 gap-3 p-2 sm:p-3 lg:grid-cols-12">
+        
+        <!-- Left 9 Columns: Blueprint / Grid Layout -->
+        <div class="flex min-w-0 flex-col gap-2.5 lg:col-span-9">
+            
+            <!-- Filters Toolbar -->
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+                <!-- Status Legend Shortcuts -->
+                <div class="custom-scrollbar flex items-center gap-2 overflow-x-auto text-[11px]">
+                    <span class="font-bold text-slate-500 whitespace-nowrap">圖例：</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-emerald-400"></span> 正常</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-purple-400"></span> 籠養</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-sky-300"></span> 有水</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-stone-200"></span> 無水</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-amber-300"></span> 警戒</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-rose-500"></span> 異常</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap text-slate-400"><span class="h-2.5 w-2.5 rounded border border-dashed border-slate-300 bg-white"></span> 未記</span>
+                </div>
+
+                <!-- Search Input -->
+                <div class="relative w-full sm:w-48">
+                    <input type="text" x-model="searchQuery" placeholder="搜尋池號 (例: F右08, 甲左2)" 
+                           class="w-full rounded-lg border border-slate-300 bg-slate-50 py-1 pl-7 pr-2 text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-orange-500 transition"/>
+                    <i data-lucide="search" class="absolute left-2 top-1.5 h-3.5 w-3.5 text-slate-400"></i>
+                    <button x-show="searchQuery" @click="searchQuery = ''" class="absolute right-2 top-1 text-slate-400 hover:text-slate-600 text-xs">✕</button>
+                </div>
+            </div>
+
+            <!-- ================= VIEW MODE 1: BLUEPRINT MAP (REAL FIELD LAYOUT) ================= -->
+            <div x-show="viewMode === 'blueprint'" class="rounded-xl border border-slate-300 bg-slate-200/60 p-2 sm:p-3 shadow-inner custom-scrollbar overflow-x-auto">
+                
+                <div class="min-w-[1020px] space-y-4">
+                    
+                    <!-- TOP HALF MAP ROW -->
+                    <div class="grid grid-cols-12 gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-300 shadow-sm">
+                        
+                        <!-- Block 1: F區 Column (F右11-01 on top, F左01-10 on bottom) -->
+                        <div class="col-span-2 border-r border-slate-300 pr-2 flex flex-col justify-between">
+                            <div class="text-[11px] font-extrabold text-slate-700 mb-1 border-b pb-0.5 flex justify-between">
+                                <span>F區 (長條列)</span>
+                                <span class="text-[9px] font-normal text-slate-400">21池</span>
+                            </div>
+                            
+                            <!-- F右 (11 down to 01) -->
+                            <div class="space-y-1">
+                                <div class="text-[9px] font-bold text-slate-400">F右 (11-01)</div>
+                                <template x-for="id in fRightList" :key="id">
+                                    <button @click="clickPondById(id)" :class="getPondBtnClass(id)" class="pond-btn w-full h-6 rounded text-[10px] font-bold flex items-center justify-between px-1.5 border">
+                                        <span x-text="id"></span>
+                                        <span class="text-[8px] opacity-80" x-text="getPondSub(id)"></span>
+                                    </button>
+                                </template>
+                            </div>
+
+                            <!-- F左 (01 down to 10) -->
+                            <div class="space-y-1 mt-3">
+                                <div class="text-[9px] font-bold text-slate-400 border-t pt-1">F左 (01-10)</div>
+                                <template x-for="id in fLeftList" :key="id">
+                                    <button @click="clickPondById(id)" :class="getPondBtnClass(id)" class="pond-btn w-full h-6 rounded text-[10px] font-bold flex items-center justify-between px-1.5 border">
+                                        <span x-text="id"></span>
+                                        <span class="text-[8px] opacity-80" x-text="getPondSub(id)"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Block 2: G區 (13 down to 01) & H區 (11 down to 01) -->
+                        <div class="col-span-3 border-r border-slate-300 pr-2 space-y-2">
+                            <div class="flex gap-2">
+                                <!-- G區 -->
+                                <div class="flex-1 space-y-1">
+                                    <div class="text-[11px] font-extrabold text-teal-800 border-b pb-0.5">G區 (13-01)</div>
+                                    <template x-for="num in gNums" :key="'G'+num">
+                                        <div class="grid grid-cols-2 gap-0.5">
+                                            <button @click="clickPondById('G左'+num)" :class="getPondBtnClass('G左'+num)" class="pond-btn h-6 rounded text-[9px] font-bold border truncate px-0.5 text-center" x-text="'G左'+num"></button>
+                                            <button @click="clickPondById('G右'+num)" :class="getPondBtnClass('G右'+num)" class="pond-btn h-6 rounded text-[9px] font-bold border truncate px-0.5 text-center" x-text="'G右'+num"></button>
+                                        </div>
+                                    </template>
+                                </div>
+
+                                <!-- H區 -->
+                                <div class="flex-1 space-y-1">
+                                    <div class="text-[11px] font-extrabold text-teal-800 border-b pb-0.5">H區 (11-01)</div>
+                                    <template x-for="num in hNums" :key="'H'+num">
+                                        <div class="grid grid-cols-2 gap-0.5">
+                                            <button @click="clickPondById('H左'+num)" :class="getPondBtnClass('H左'+num)" class="pond-btn h-6 rounded text-[9px] font-bold border truncate px-0.5 text-center" x-text="'H左'+num"></button>
+                                            <button @click="clickPondById('H右'+num)" :class="getPondBtnClass('H右'+num)" class="pond-btn h-6 rounded text-[9px] font-bold border truncate px-0.5 text-center" x-text="'H右'+num"></button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Block 3: I區 -->
+                        <div class="col-span-3 border-r border-slate-300 pr-2 flex flex-col justify-start">
+                            <div>
+                                <div class="text-[11px] font-extrabold text-slate-800 mb-1 border-b pb-0.5">I區</div>
+                                <!-- I區 Grid -->
+                                <div class="grid grid-cols-2 gap-1 mb-2">
+                                    <div class="space-y-1">
+                                        <button @click="clickPondById('I左3')" :class="getPondBtnClass('I左3')" class="pond-btn w-full h-6 rounded text-[9px] font-bold border">I左3</button>
+                                        <button @click="clickPondById('I左2')" :class="getPondBtnClass('I左2')" class="pond-btn w-full h-6 rounded text-[9px] font-bold border">I左2</button>
+                                        <button @click="clickPondById('I左1')" :class="getPondBtnClass('I左1')" class="pond-btn w-full h-6 rounded text-[9px] font-bold border">I左1</button>
+                                    </div>
+                                    <div class="space-y-1">
+                                        <button @click="clickPondById('I右4')" :class="getPondBtnClass('I右4')" class="pond-btn w-full h-6 rounded text-[9px] font-bold border">I右4</button>
+                                        <button @click="clickPondById('I右3')" :class="getPondBtnClass('I右3')" class="pond-btn w-full h-6 rounded text-[9px] font-bold border">I右3</button>
+                                        <button @click="clickPondById('I右2')" :class="getPondBtnClass('I右2')" class="pond-btn w-full h-6 rounded text-[9px] font-bold border">I右2</button>
+                                        <button @click="clickPondById('I右1')" :class="getPondBtnClass('I右1')" class="pond-btn w-full h-6 rounded text-[9px] font-bold border">I右1</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Block 4: 丙區 (丙14 top + 丙13 down to 01) -->
+                        <div class="col-span-2 border-r border-slate-300 pr-2 space-y-1">
+                            <div class="text-[11px] font-extrabold text-purple-900 border-b pb-0.5">丙區</div>
+                            <!-- 丙14 single top -->
+                            <button @click="clickPondById('丙14')" :class="getPondBtnClass('丙14')" class="pond-btn w-full h-6 rounded text-[9px] font-bold border bg-purple-50 text-purple-900">丙14 (頂池)</button>
+                            
+                            <div class="space-y-0.5">
+                                <template x-for="num in bingNums" :key="'丙'+num">
+                                    <div class="grid grid-cols-2 gap-0.5">
+                                        <button @click="clickPondById('丙左'+num)" :class="getPondBtnClass('丙左'+num)" class="pond-btn h-5 rounded text-[8px] font-bold border truncate text-center" x-text="'丙左'+num"></button>
+                                        <button @click="clickPondById('丙右'+num)" :class="getPondBtnClass('丙右'+num)" class="pond-btn h-5 rounded text-[8px] font-bold border truncate text-center" x-text="'丙右'+num"></button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Block 5: 乙區 (乙左1-9, 乙右1-10) -->
+                        <div class="col-span-2 space-y-1">
+                            <div class="text-[11px] font-extrabold text-indigo-900 border-b pb-0.5">乙區</div>
+                            <div class="grid grid-cols-2 gap-1">
+                                <!-- 乙左 9 down to 1 -->
+                                <div class="space-y-1">
+                                    <div class="text-[8px] font-bold text-slate-400">乙左(9-1)</div>
+                                    <template x-for="num in yiLeftNums" :key="'乙左'+num">
+                                        <button @click="clickPondById('乙左'+num)" :class="getPondBtnClass('乙左'+num)" class="pond-btn w-full h-5 rounded text-[8px] font-bold border" x-text="'乙左'+num"></button>
+                                    </template>
+                                </div>
+                                <!-- 乙右 10 down to 1 -->
+                                <div class="space-y-1">
+                                    <div class="text-[8px] font-bold text-slate-400">乙右(10-1)</div>
+                                    <template x-for="num in yiRightNums" :key="'乙右'+num">
+                                        <button @click="clickPondById('乙右'+num)" :class="getPondBtnClass('乙右'+num)" class="pond-btn w-full h-5 rounded text-[8px] font-bold border" x-text="'乙右'+num"></button>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+
+                    <!-- BOTTOM HALF MAP ROW -->
+                    <div class="grid grid-cols-12 gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-300 shadow-sm">
+                        
+                        <!-- Block 1: E區 (E右1-14 / E左1-14) -->
+                        <div class="col-span-3 border-r border-slate-300 pr-2 space-y-1">
+                            <div class="text-[11px] font-extrabold text-blue-900 border-b pb-0.5">E區 (1~14)</div>
+                            <div class="space-y-0.5">
+                                <template x-for="num in 14" :key="'E'+num">
+                                    <div class="grid grid-cols-2 gap-0.5">
+                                        <button @click="clickPondById('E右'+num)" :class="getPondBtnClass('E右'+num)" class="pond-btn h-5 rounded text-[8px] font-bold border truncate text-center" x-text="'E右'+num"></button>
+                                        <button @click="clickPondById('E左'+num)" :class="getPondBtnClass('E左'+num)" class="pond-btn h-5 rounded text-[8px] font-bold border truncate text-center" x-text="'E左'+num"></button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Block 2: D區 (D右1-14 / D左1-14) -->
+                        <div class="col-span-3 border-r border-slate-300 pr-2 space-y-1">
+                            <div class="text-[11px] font-extrabold text-blue-900 border-b pb-0.5">D區 (1~14)</div>
+                            <div class="space-y-0.5">
+                                <template x-for="num in 14" :key="'D'+num">
+                                    <div class="grid grid-cols-2 gap-0.5">
+                                        <button @click="clickPondById('D右'+num)" :class="getPondBtnClass('D右'+num)" class="pond-btn h-5 rounded text-[8px] font-bold border truncate text-center" x-text="'D右'+num"></button>
+                                        <button @click="clickPondById('D左'+num)" :class="getPondBtnClass('D左'+num)" class="pond-btn h-5 rounded text-[8px] font-bold border truncate text-center" x-text="'D左'+num"></button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Block 3: C區 (C右1-14, C左1-21) -->
+                        <div class="col-span-3 border-r border-slate-300 pr-2 space-y-1">
+                            <div class="text-[11px] font-extrabold text-blue-900 border-b pb-0.5">C區</div>
+                            <div class="grid grid-cols-2 gap-1">
+                                <!-- C右 1~14 -->
+                                <div class="space-y-0.5">
+                                    <div class="text-[8px] font-bold text-slate-400">C右(1-14)</div>
+                                    <template x-for="num in 14" :key="'C右'+num">
+                                        <button @click="clickPondById('C右'+num)" :class="getPondBtnClass('C右'+num)" class="pond-btn w-full h-5 rounded text-[8px] font-bold border" x-text="'C右'+num"></button>
+                                    </template>
+                                </div>
+                                <!-- C左 1~21 -->
+                                <div class="space-y-0.5">
+                                    <div class="text-[8px] font-bold text-slate-400">C左(1-21)</div>
+                                    <template x-for="num in 21" :key="'C左'+num">
+                                        <button @click="clickPondById('C左'+num)" :class="getPondBtnClass('C左'+num)" class="pond-btn w-full h-5 rounded text-[8px] font-bold border" x-text="'C左'+num"></button>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Block 4: A區 + a小區 & 圓桶 (1-7) -->
+                        <div class="col-span-2 border-r border-slate-300 pr-2 space-y-2">
+                            <!-- A區 (A右/A左 1-5) -->
+                            <div>
+                                <div class="text-[10px] font-bold text-slate-700 border-b mb-1">A區 (1-5)</div>
+                                <div class="space-y-0.5">
+                                    <template x-for="num in 5" :key="'A'+num">
+                                        <div class="grid grid-cols-2 gap-0.5">
+                                            <button @click="clickPondById('A右'+num)" :class="getPondBtnClass('A右'+num)" class="pond-btn h-5 rounded text-[8px] font-bold border" x-text="'A右'+num"></button>
+                                            <button @click="clickPondById('A左'+num)" :class="getPondBtnClass('A左'+num)" class="pond-btn h-5 rounded text-[8px] font-bold border" x-text="'A左'+num"></button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <!-- a小區 & 圓桶 (1-7) -->
+                            <div class="grid grid-cols-2 gap-1 pt-1 border-t">
+                                <!-- a小 1-10 -->
+                                <div class="space-y-0.5">
+                                    <div class="text-[8px] font-bold text-slate-400">a小池</div>
+                                    <template x-for="num in 10" :key="'a小'+num">
+                                        <button @click="clickPondById('a小'+num)" :class="getPondBtnClass('a小'+num)" class="pond-btn w-full h-4.5 rounded text-[8px] font-bold border" x-text="'a小'+num"></button>
+                                    </template>
+                                </div>
+
+                                <!-- Round Tanks 1-7 (圓桶) -->
+                                <div class="space-y-0.5">
+                                    <div class="text-[8px] font-bold text-slate-400">圓桶 (①-⑦)</div>
+                                    <template x-for="num in 7" :key="'桶'+num">
+                                        <button @click="clickPondById('桶'+num)" :class="getPondBtnClass('桶'+num)" class="pond-btn w-full h-5 rounded-full text-[8px] font-bold border text-center flex items-center justify-center gap-0.5">
+                                            <span>桶</span><span x-text="num"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Block 5: 甲區 (甲右1-6, 甲左1-7) -->
+                        <div class="col-span-1 space-y-1">
+                            <div class="text-[11px] font-extrabold text-amber-900 border-b pb-0.5">甲區</div>
+                            <div class="space-y-1">
+                                <!-- 甲右 1-6 -->
+                                <div class="space-y-0.5">
+                                    <div class="text-[8px] font-bold text-slate-400">甲右(1-6)</div>
+                                    <template x-for="num in 6" :key="'甲右'+num">
+                                        <button @click="clickPondById('甲右'+num)" :class="getPondBtnClass('甲右'+num)" class="pond-btn w-full h-5 rounded text-[8px] font-bold border" x-text="'甲右'+num"></button>
+                                    </template>
+                                </div>
+                                <!-- 甲左 1-7 -->
+                                <div class="space-y-0.5 pt-1 border-t">
+                                    <div class="text-[8px] font-bold text-slate-400">甲左(1-7)</div>
+                                    <template x-for="num in 7" :key="'甲左'+num">
+                                        <button @click="clickPondById('甲左'+num)" :class="getPondBtnClass('甲左'+num)" class="pond-btn w-full h-5 rounded text-[8px] font-bold border" x-text="'甲左'+num"></button>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- ================= VIEW MODE 2: GROUPED ZONE CARDS ================= -->
+            <div x-show="viewMode === 'grid'" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                
+                <!-- Zone Filters -->
+                <div class="custom-scrollbar flex items-center gap-1.5 overflow-x-auto pb-2 mb-3 border-b border-slate-100">
+                    <span class="whitespace-nowrap text-xs font-bold text-slate-500">篩選區域:</span>
+                    <button @click="selectedAreaTab = 'ALL'" :class="selectedAreaTab === 'ALL' ? 'bg-orange-600 text-white' : 'bg-slate-100 text-slate-700'" class="px-2.5 py-1 rounded text-xs font-bold whitespace-nowrap">全部</button>
+                    <template x-for="zone in zones" :key="zone.name">
+                        <button @click="selectedAreaTab = zone.name" 
+                                :class="selectedAreaTab === zone.name ? 'bg-orange-600 text-white' : 'bg-slate-100 text-slate-700'"
+                                class="px-2.5 py-1 rounded text-xs font-bold whitespace-nowrap" x-text="zone.name"></button>
+                    </template>
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <template x-for="zone in visibleZones" :key="zone.name">
+                        <section class="rounded-xl border border-slate-200 bg-slate-50/50 p-2.5">
+                            <header class="mb-2 flex items-center justify-between border-b pb-1">
+                                <h3 class="text-xs font-bold text-slate-800" x-text="zone.name"></h3>
+                                <span class="text-[10px] bg-slate-200 px-1.5 py-0.5 rounded text-slate-600" x-text="`${zone.ponds.length} 池`"></span>
+                            </header>
+                            
+                            <div class="flex flex-wrap gap-1.5">
+                                <template x-for="pond in zone.ponds" :key="pond.id">
+                                    <button @click="openPondModal(pond)" :class="getPondButtonClass(pond)" class="relative shrink-0 w-11 h-9 rounded text-[10px] font-bold flex flex-col items-center justify-center p-0.5 border">
+                                        <span x-text="pond.id"></span>
+                                        <span class="text-[8px] opacity-75 truncate max-w-full" x-text="getPondSubtext(pond)"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </section>
+                    </template>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Side Panel (Dashboard & Log Feed) -->
+        <div class="flex min-w-0 flex-col gap-3 lg:col-span-3">
+            
+            <!-- Quick Actions & Stats Card -->
+            <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <h3 class="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                    <i data-lucide="sliders" class="h-4 w-4 text-orange-600"></i>
+                    全場巡視與統計
+                </h3>
+                
+                <div class="grid grid-cols-2 gap-1.5 text-xs">
+                    <button @click="openQuickBatchModal()" class="flex flex-col items-center justify-center p-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition">
+                        <i data-lucide="play-circle" class="h-4 w-4 mb-0.5 text-emerald-600"></i>
+                        <span class="font-bold text-[11px]">全場巡邏</span>
+                    </button>
+                    
+                    <button @click="resetAllRecords()" class="flex flex-col items-center justify-center p-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition">
+                        <i data-lucide="rotate-ccw" class="h-4 w-4 mb-0.5 text-slate-500"></i>
+                        <span class="font-bold text-[11px]">重置本日</span>
+                    </button>
+                </div>
+
+                <!-- Mini Chart Container -->
+                <div class="mt-3 pt-2 border-t border-slate-100">
+                    <div class="text-[11px] font-bold text-slate-600 mb-1 flex items-center justify-between">
+                        <span>池況完成度</span>
+                        <span class="text-[10px] text-slate-400" x-text="`${recordedCount}/${totalPondsCount}`"></span>
+                    </div>
+                    <div class="h-32 relative">
+                        <canvas id="statusChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity Logs Feed -->
+            <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm flex-1 flex flex-col min-h-[300px]">
+                <h3 class="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
+                    <span class="flex items-center gap-1">
+                        <i data-lucide="history" class="h-3.5 w-3.5 text-teal-600"></i>
+                        最新填報紀錄
+                    </span>
+                    <span class="text-[10px] text-slate-400" x-text="`共 ${logs.length} 筆`"></span>
+                </h3>
+
+                <div class="custom-scrollbar flex-1 overflow-y-auto space-y-1.5 max-h-[420px] pr-1 text-xs">
+                    <template x-for="log in logs" :key="log.id">
+                        <div class="p-2 rounded-lg border border-slate-100 bg-slate-50 text-[11px]">
+                            <div class="flex items-center justify-between font-bold text-slate-800">
+                                <span class="flex items-center gap-1">
+                                    <span class="px-1.5 py-0.2 rounded text-[10px]" :class="getStatusBadgeClass(log.status)" x-text="log.pondId"></span>
+                                    <span x-text="getStatusName(log.status)"></span>
+                                </span>
+                                <span class="text-[9px] text-slate-400 font-normal" x-text="log.time"></span>
+                            </div>
+                            <div class="mt-1 text-slate-600 text-[10px] flex flex-wrap gap-1.5">
+                                <span x-show="log.breed">品種: <strong x-text="log.breed"></strong></span>
+                                <span x-show="log.fishCount > 0" x-text="`${log.fishCount}尾`"></span>
+                                <span x-show="log.deadCount > 0" class="text-rose-600 font-bold" x-text="`💀死魚${log.deadCount}尾`"></span>
+                                <span x-show="log.hasBasket" class="text-purple-600 font-bold">網籃</span>
+                            </div>
+                            <div x-show="log.notes" class="mt-0.5 text-[9px] text-slate-500 italic truncate" x-text="`備註: ${log.notes}`"></div>
+                        </div>
+                    </template>
+                    <div x-show="logs.length === 0" class="py-8 text-center text-xs text-slate-400">
+                        今日尚無填報紀錄
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Inspection Modal -->
+    <div x-show="showPondModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-sm" x-transition.opacity>
+        <div @click.outside="showPondModal = false" class="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-100 overflow-hidden flex flex-col">
+            
+            <div class="bg-gradient-to-r from-orange-600 to-amber-600 px-4 py-3 text-white flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="clipboard-edit" class="h-5 w-5 text-amber-200"></i>
+                    <div>
+                        <h2 class="text-base font-bold flex items-center gap-2">
+                            <span x-text="activePond ? activePond.id : ''" class="text-xl"></span>
+                            <span class="text-xs bg-white/20 font-normal px-2 py-0.5 rounded-full" x-text="activePond ? activePond.zone : ''"></span>
+                        </h2>
+                    </div>
+                </div>
+                <button @click="showPondModal = false" class="rounded-lg p-1 text-white/80 hover:bg-white/20 hover:text-white">
+                    <i data-lucide="x" class="h-5 w-5"></i>
+                </button>
+            </div>
+
+            <div x-if="activePond" class="p-4 space-y-3.5 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">1. 池況類別標籤</label>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <template x-for="st in statusOptions" :key="st.key">
+                            <button type="button" @click="activePondForm.status = st.key"
+                                    :class="activePondForm.status === st.key ? st.activeClass + ' ring-2 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'"
+                                    class="p-1.5 rounded-lg border text-center transition flex flex-col items-center justify-center gap-0.5">
+                                <span class="text-xs" x-text="st.icon"></span>
+                                <span class="text-[10px]" x-text="st.label"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">主要金魚品種</label>
+                        <input type="text" list="breed-options" x-model="activePondForm.breed" placeholder="自訂輸入或選擇品種 (如: 蘭壽)" class="w-full rounded-lg border border-slate-300 p-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-orange-500 transition"/>
+                        <datalist id="breed-options">
+                            <option value="蘭壽">蘭壽 (Ranchu)</option>
+                            <option value="泰獅/獅頭">泰獅 / 獅頭</option>
+                            <option value="琉金">琉金 (Ryukin)</option>
+                            <option value="土佐金">土佐金</option>
+                            <option value="蝶尾">蝶尾</option>
+                            <option value="珠鱗">珠鱗</option>
+                            <option value="頂種/親魚">頂種 / 親魚</option>
+                            <option value="水泡眼/望天">水泡眼 / 望天</option>
+                            <option value="混養/當歲苗">混養 / 當歲苗</option>
+                        </datalist>
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">估算數量 (尾)</label>
+                        <input type="number" min="0" x-model.number="activePondForm.fishCount" placeholder="0" class="w-full rounded-lg border border-slate-300 p-1.5 text-xs"/>
+                    </div>
+                </div>
+
+                <div class="rounded-lg border border-purple-200 bg-purple-50/50 p-2">
+                    <label class="flex items-center gap-2 cursor-pointer font-bold text-purple-900">
+                        <input type="checkbox" x-model="activePondForm.hasBasket" class="rounded border-purple-300 text-purple-600 h-4 w-4"/>
+                        <span>網籃 / 籠養標記</span>
+                    </label>
+                </div>
+
+                <div class="rounded-lg border border-rose-200 bg-rose-50/50 p-2">
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="font-bold text-rose-900 flex items-center gap-1">
+                            <i data-lucide="skull" class="h-3.5 w-3.5 text-rose-600"></i> 今日死魚紀錄
+                        </label>
+                        <div class="flex items-center gap-1">
+                            <button type="button" @click="activePondForm.deadCount = Math.max(0, activePondForm.deadCount - 1)" class="w-5 h-5 rounded bg-rose-200 text-rose-800 font-bold flex items-center justify-center">-</button>
+                            <span class="w-6 text-center font-bold text-sm text-rose-700" x-text="activePondForm.deadCount"></span>
+                            <button type="button" @click="activePondForm.deadCount++" class="w-5 h-5 rounded bg-rose-200 text-rose-800 font-bold flex items-center justify-center">+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">巡視備註 / 水質與用藥</label>
+                    <textarea x-model="activePondForm.notes" rows="2" placeholder="水質狀況、換水或加鹽投藥..." class="w-full rounded-lg border border-slate-300 p-1.5 text-xs"></textarea>
+                </div>
+            </div>
+
+            <div class="bg-slate-50 border-t border-slate-200 px-4 py-2.5 flex items-center justify-between">
+                <button type="button" @click="clearCurrentPond()" class="text-xs text-rose-600 hover:underline">清除紀錄</button>
+                <div class="flex gap-2">
+                    <button type="button" @click="showPondModal = false" class="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium">取消</button>
+                    <button type="button" @click="savePondInspection()" class="px-4 py-1.5 rounded-lg bg-orange-600 font-bold text-white shadow">儲存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dead Fish & Confirm Modals -->
+    <div x-show="showDeadFishModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-sm" x-transition.opacity>
+        <div @click.outside="showDeadFishModal = false" class="w-full max-w-sm rounded-2xl bg-white shadow-2xl border border-slate-100 p-5 text-center">
+            <div class="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                <i data-lucide="skull" class="h-5 w-5"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-800">今日死魚統計</h3>
+            <div class="my-3 rounded-xl bg-rose-50 p-3 border border-rose-100">
+                <div class="text-3xl font-extrabold text-rose-600" x-text="`${totalDeadFishToday} 尾`"></div>
+            </div>
+            <button @click="showDeadFishModal = false" class="w-full rounded-lg bg-slate-800 py-1.5 text-xs font-bold text-white">確定</button>
+        </div>
+    </div>
+
+    <!-- Reset Confirm Modal -->
+    <div x-show="showResetConfirmModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-sm" x-transition.opacity>
+        <div @click.outside="showResetConfirmModal = false" class="w-full max-w-sm rounded-2xl bg-white shadow-2xl border border-slate-100 p-5 text-center">
+            <h3 class="text-base font-bold text-slate-800">重置本日巡視紀錄？</h3>
+            <p class="text-xs text-slate-500 mt-1">確定要清空本日所有池號紀錄？</p>
+            <div class="mt-4 flex gap-2">
+                <button @click="showResetConfirmModal = false" class="flex-1 rounded-lg border border-slate-300 bg-white py-1.5 text-xs font-medium text-slate-700">取消</button>
+                <button @click="confirmResetAll()" class="flex-1 rounded-lg bg-rose-600 py-1.5 text-xs font-bold text-white shadow">確定重置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Sequential Sweep Modal -->
+    <div x-show="showBatchModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/70 backdrop-blur-sm" x-transition.opacity>
+        <div @click.outside="showBatchModal = false" class="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-slate-100 overflow-hidden flex flex-col">
+            <div class="bg-gradient-to-r from-emerald-600 to-teal-700 px-4 py-2.5 text-white flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="zap" class="h-5 w-5 text-emerald-200"></i>
+                    <h2 class="text-base font-bold">逐池巡邏填報</h2>
+                </div>
+                <button @click="showBatchModal = false" class="text-white/80 hover:text-white"><i data-lucide="x" class="h-5 w-5"></i></button>
+            </div>
+
+            <div class="p-4 space-y-3 text-xs" x-data="{ batchIdx: 0 }">
+                <div class="flex items-center justify-between bg-slate-100 p-2 rounded-lg font-bold">
+                    <span>當前池號：<span x-text="allPondsFlatList[batchIdx]?.id || ''" class="text-base text-orange-600"></span></span>
+                    <span class="text-[10px] text-slate-500" x-text="`${batchIdx + 1} / ${allPondsFlatList.length}`"></span>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">池況設定</label>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <template x-for="st in statusOptions" :key="st.key">
+                            <button type="button" @click="batchForm.status = st.key"
+                                    :class="batchForm.status === st.key ? st.activeClass + ' ring-2 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'"
+                                    class="p-1.5 rounded-lg border text-center">
+                                <div class="text-xs" x-text="st.icon"></div>
+                                <div class="text-[10px]" x-text="st.label"></div>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">死魚尾數</label>
+                        <input type="number" min="0" x-model.number="batchForm.deadCount" placeholder="0" class="w-full rounded-lg border border-slate-300 p-1.5 text-xs"/>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">備註</label>
+                        <input type="text" x-model="batchForm.notes" placeholder="簡短備註" class="w-full rounded-lg border border-slate-300 p-1.5 text-xs"/>
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center pt-2">
+                    <button type="button" @click="if(batchIdx > 0) { batchIdx--; loadBatchForm(batchIdx); }" :disabled="batchIdx === 0" class="px-3 py-1.5 rounded bg-slate-200 text-slate-700 font-bold disabled:opacity-40">上一池</button>
+                    <button type="button" @click="saveBatchStep(batchIdx); if(batchIdx < allPondsFlatList.length - 1) { batchIdx++; loadBatchForm(batchIdx); } else { showBatchModal = false; }" class="px-4 py-1.5 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-500 shadow">儲存並下池 ➔</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        function goldfishApp() {
+            return {
+                viewMode: 'blueprint', // 'blueprint' or 'grid'
+                selectedAreaTab: 'ALL',
+                selectedStatusFilter: 'ALL',
+                searchQuery: '',
+                showPondModal: false,
+                showBatchModal: false,
+                showDeadFishModal: false,
+                showResetConfirmModal: false,
+                activePond: null,
+                
+                activePondForm: {
+                    status: 'NORMAL',
+                    breed: '',
+                    fishCount: 0,
+                    hasBasket: false,
+                    basketNotes: '',
+                    deadCount: 0,
+                    deadReason: '',
+                    notes: ''
+                },
+                
+                batchForm: {
+                    status: 'NORMAL',
+                    deadCount: 0,
+                    notes: ''
+                },
+
+                // Numbers lists for Blueprint Layout matching photo
+                fRightList: ['F右11','F右10','F右09','F右08','F右07','F右06','F右05','F右04','F右03','F右02','F右01'],
+                fLeftList: ['F左01','F左02','F左03','F左04','F左05','F左06','F左07','F左08','F左09','F左10'],
+                gNums: ['13','12','11','10','09','08','07','06','05','04','03','02','01'],
+                hNums: ['11','10','09','08','07','06','05','04','03','02','01'],
+                bingNums: ['13','12','11','10','09','08','07','06','05','04','03','02','01'],
+                yiLeftNums: ['9','8','7','6','5','4','3','2','1'],
+                yiRightNums: ['10','9','8','7','6','5','4','3','2','1'],
+
+                statusOptions: [
+                    { key: 'NORMAL', label: '正常養殖', icon: '🟢', activeClass: 'bg-emerald-100 border-emerald-400 text-emerald-900' },
+                    { key: 'BASKET', label: '籃子有魚', icon: '🟣', activeClass: 'bg-purple-100 border-purple-400 text-purple-900' },
+                    { key: 'EMPTY_WATER', label: '空池有水', icon: '🔵', activeClass: 'bg-sky-100 border-sky-400 text-sky-900' },
+                    { key: 'EMPTY_NO_WATER', label: '空池無水', icon: '⚪', activeClass: 'bg-stone-200 border-stone-400 text-stone-900' },
+                    { key: 'WARNING', label: '警戒觀察', icon: '🟡', activeClass: 'bg-amber-100 border-amber-400 text-amber-900' },
+                    { key: 'DANGER', label: '異常處理', icon: '🔴', activeClass: 'bg-rose-100 border-rose-400 text-rose-900' },
+                ],
+
+                zones: [],
+                pondMap: new Map(),
+                logs: [],
+                chartInstance: null,
+
+                initApp() {
+                    this.buildBlueprintPonds();
+                    this.loadFromLocalStorage();
+                    this.$nextTick(() => {
+                        lucide.createIcons();
+                        this.initChart();
+                    });
+                },
+
+                buildBlueprintPonds() {
+                    const zonesConfig = [
+                        { name: 'F區', ids: [...this.fRightList, ...this.fLeftList] },
+                        { name: 'G區', ids: this.gNums.flatMap(n => ['G左'+n, 'G右'+n]) },
+                        { name: 'H區', ids: this.hNums.flatMap(n => ['H左'+n, 'H右'+n]) },
+                        { name: 'I區', ids: ['I左3','I左2','I左1','I右4','I右3','I右2','I右1'] },
+                        { name: '丙區', ids: ['丙14', ...this.bingNums.flatMap(n => ['丙左'+n, '丙右'+n])] },
+                        { name: '乙區', ids: [...this.yiLeftNums.map(n=>'乙左'+n), ...this.yiRightNums.map(n=>'乙右'+n)] },
+                        { name: 'E區', ids: Array.from({length:14}, (_,i)=>i+1).flatMap(n=>['E右'+n, 'E左'+n]) },
+                        { name: 'D區', ids: Array.from({length:14}, (_,i)=>i+1).flatMap(n=>['D右'+n, 'D左'+n]) },
+                        { name: 'C區', ids: [...Array.from({length:14}, (_,i)=>'C右'+(i+1)), ...Array.from({length:21}, (_,i)=>'C左'+(i+1))] },
+                        { name: 'A區', ids: Array.from({length:5}, (_,i)=>i+1).flatMap(n=>['A右'+n, 'A左'+n]) },
+                        { name: 'a小區 & 桶', ids: [...Array.from({length:10}, (_,i)=>'a小'+(i+1)), ...Array.from({length:7}, (_,i)=>'桶'+(i+1))] },
+                        { name: '甲區', ids: [...Array.from({length:6}, (_,i)=>'甲右'+(i+1)), ...Array.from({length:7}, (_,i)=>'甲左'+(i+1))] }
+                    ];
+
+                    this.pondMap.clear();
+                    this.zones = zonesConfig.map(z => {
+                        const ponds = z.ids.map(id => {
+                            const p = {
+                                id: id,
+                                zone: z.name,
+                                status: '',
+                                breed: '',
+                                fishCount: 0,
+                                hasBasket: false,
+                                deadCount: 0,
+                                notes: '',
+                                lastUpdated: null
+                            };
+                            this.pondMap.set(id, p);
+                            return p;
+                        });
+                        return { name: z.name, ponds: ponds };
+                    });
+                },
+
+                get allPondsFlatList() {
+                    const list = [];
+                    this.zones.forEach(z => z.ponds.forEach(p => list.push(p)));
+                    return list;
+                },
+
+                get totalPondsCount() {
+                    return this.allPondsFlatList.length;
+                },
+
+                get recordedCount() {
+                    return this.allPondsFlatList.filter(p => p.status).length;
+                },
+
+                get stats() {
+                    const res = { NORMAL: 0, BASKET: 0, EMPTY_WATER: 0, EMPTY_NO_WATER: 0, WARNING: 0, DANGER: 0, UNRECORDED: 0 };
+                    this.allPondsFlatList.forEach(p => {
+                        if (p.status && res[p.status] !== undefined) res[p.status]++;
+                        else res.UNRECORDED++;
+                    });
+                    return res;
+                },
+
+                get totalDeadFishToday() {
+                    return this.allPondsFlatList.reduce((sum, p) => sum + (p.deadCount || 0), 0);
+                },
+
+                get visibleZones() {
+                    return this.zones.map(z => {
+                        if (this.selectedAreaTab !== 'ALL' && z.name !== this.selectedAreaTab) return null;
+                        const filtered = z.ponds.filter(p => {
+                            if (this.selectedStatusFilter !== 'ALL' && p.status !== this.selectedStatusFilter) return false;
+                            if (this.searchQuery.trim()) {
+                                const q = this.searchQuery.trim().toLowerCase();
+                                return p.id.toLowerCase().includes(q) || (p.breed && p.breed.toLowerCase().includes(q));
+                            }
+                            return true;
+                        });
+                        if (filtered.length === 0) return null;
+                        return { ...z, ponds: filtered };
+                    }).filter(Boolean);
+                },
+
+                getPondBtnClass(id) {
+                    const p = this.pondMap.get(id);
+                    if (!p || !p.status) return 'border-dashed border-slate-300 bg-white/90 text-slate-600 hover:border-orange-500 hover:bg-orange-50';
+                    switch (p.status) {
+                        case 'NORMAL': return 'bg-emerald-400 border-emerald-500 text-slate-900 font-extrabold';
+                        case 'BASKET': return 'bg-purple-400 border-purple-500 text-slate-900 font-extrabold';
+                        case 'EMPTY_WATER': return 'bg-sky-300 border-sky-400 text-slate-900';
+                        case 'EMPTY_NO_WATER': return 'bg-stone-200 border-stone-300 text-slate-600';
+                        case 'WARNING': return 'bg-amber-300 border-amber-400 text-slate-900 font-bold animate-pulse';
+                        case 'DANGER': return 'bg-rose-500 border-rose-600 text-white font-bold animate-pulse';
+                        default: return 'bg-white border-slate-200 text-slate-600';
+                    }
+                },
+
+                getPondButtonClass(pond) {
+                    return this.getPondBtnClass(pond ? pond.id : '');
+                },
+
+                getPondSub(id) {
+                    const p = this.pondMap.get(id);
+                    if (!p) return '';
+                    if (p.deadCount > 0) return `💀${p.deadCount}`;
+                    if (p.hasBasket) return '網籃';
+                    if (p.breed) return p.breed.substring(0, 2);
+                    return '';
+                },
+
+                getPondSubtext(p) {
+                    if (p.deadCount > 0) return `死${p.deadCount}`;
+                    if (p.breed) return p.breed;
+                    if (p.hasBasket) return '網籃';
+                    return p.status ? this.getStatusName(p.status) : '';
+                },
+
+                clickPondById(id) {
+                    const p = this.pondMap.get(id);
+                    if (p) this.openPondModal(p);
+                },
+
+                toggleStatusFilter(st) {
+                    this.selectedStatusFilter = (this.selectedStatusFilter === st) ? 'ALL' : st;
+                },
+
+                openPondModal(p) {
+                    this.activePond = p;
+                    this.activePondForm = {
+                        status: p.status || 'NORMAL',
+                        breed: p.breed || '',
+                        fishCount: p.fishCount || 0,
+                        hasBasket: !!p.hasBasket,
+                        basketNotes: p.basketNotes || '',
+                        deadCount: p.deadCount || 0,
+                        deadReason: p.deadReason || '',
+                        notes: p.notes || ''
+                    };
+                    this.showPondModal = true;
+                    this.$nextTick(() => lucide.createIcons());
+                },
+
+                openModalForNewOrBatch() {
+                    const unrec = this.allPondsFlatList.find(p => !p.status);
+                    this.openPondModal(unrec || this.allPondsFlatList[0]);
+                },
+
+                savePondInspection() {
+                    if (!this.activePond) return;
+                    const nowStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+                    Object.assign(this.activePond, { ...this.activePondForm, lastUpdated: nowStr });
+
+                    this.logs.unshift({
+                        id: Date.now(),
+                        pondId: this.activePond.id,
+                        status: this.activePondForm.status,
+                        breed: this.activePondForm.breed,
+                        fishCount: this.activePondForm.fishCount,
+                        deadCount: this.activePondForm.deadCount,
+                        hasBasket: this.activePondForm.hasBasket,
+                        notes: this.activePondForm.notes,
+                        time: nowStr
+                    });
+
+                    this.saveToLocalStorage();
+                    this.updateChart();
+                    this.showPondModal = false;
+                },
+
+                clearCurrentPond() {
+                    if (!this.activePond) return;
+                    Object.assign(this.activePond, { status: '', breed: '', fishCount: 0, hasBasket: false, deadCount: 0, notes: '', lastUpdated: null });
+                    this.saveToLocalStorage();
+                    this.updateChart();
+                    this.showPondModal = false;
+                },
+
+                openQuickBatchModal() {
+                    this.loadBatchForm(0);
+                    this.showBatchModal = true;
+                },
+
+                loadBatchForm(idx) {
+                    const p = this.allPondsFlatList[idx];
+                    if (p) {
+                        this.batchForm = { status: p.status || 'NORMAL', deadCount: p.deadCount || 0, notes: p.notes || '' };
+                    }
+                },
+
+                saveBatchStep(idx) {
+                    const p = this.allPondsFlatList[idx];
+                    if (p) {
+                        p.status = this.batchForm.status;
+                        p.deadCount = this.batchForm.deadCount;
+                        p.notes = this.batchForm.notes;
+                        p.lastUpdated = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+                        this.saveToLocalStorage();
+                        this.updateChart();
+                    }
+                },
+
+                openDeadFishModal() {
+                    this.showDeadFishModal = true;
+                    this.$nextTick(() => lucide.createIcons());
+                },
+
+                resetAllRecords() {
+                    this.showResetConfirmModal = true;
+                },
+
+                confirmResetAll() {
+                    this.allPondsFlatList.forEach(p => {
+                        p.status = ''; p.breed = ''; p.fishCount = 0; p.hasBasket = false; p.deadCount = 0; p.notes = ''; p.lastUpdated = null;
+                    });
+                    this.logs = [];
+                    this.saveToLocalStorage();
+                    this.updateChart();
+                    this.showResetConfirmModal = false;
+                },
+
+                getStatusName(st) {
+                    const o = this.statusOptions.find(x => x.key === st);
+                    return o ? o.label : '未記錄';
+                },
+
+                getStatusBadgeClass(st) {
+                    switch (st) {
+                        case 'NORMAL': return 'bg-emerald-100 text-emerald-800';
+                        case 'BASKET': return 'bg-purple-100 text-purple-800';
+                        case 'EMPTY_WATER': return 'bg-sky-100 text-sky-800';
+                        case 'EMPTY_NO_WATER': return 'bg-stone-100 text-stone-800';
+                        case 'WARNING': return 'bg-amber-100 text-amber-800';
+                        case 'DANGER': return 'bg-rose-100 text-rose-800';
+                        default: return 'bg-slate-100 text-slate-600';
+                    }
+                },
+
+                saveToLocalStorage() {
+                    localStorage.setItem('goldfish_blueprint_data_v3', JSON.stringify({
+                        ponds: this.allPondsFlatList,
+                        logs: this.logs
+                    }));
+                },
+
+                loadFromLocalStorage() {
+                    const saved = localStorage.getItem('goldfish_blueprint_data_v3');
+                    if (saved) {
+                        try {
+                            const parsed = JSON.parse(saved);
+                            if (parsed.ponds) {
+                                parsed.ponds.forEach(p => {
+                                    if (this.pondMap.has(p.id)) {
+                                        Object.assign(this.pondMap.get(p.id), p);
+                                    }
+                                });
+                            }
+                            if (parsed.logs) this.logs = parsed.logs;
+                        } catch (e) { console.error('Storage parse error:', e); }
+                    }
+                },
+
+                exportCSV() {
+                    let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+                    csvContent += "區域,池號,池況,品種,估算數量,網籃籠養,死魚數,備註,最後更新時間\n";
+                    this.allPondsFlatList.forEach(p => {
+                        csvContent += [p.zone, p.id, this.getStatusName(p.status), p.breed||'', p.fishCount||0, p.hasBasket?'是':'否', p.deadCount||0, `"${p.notes||''}"`, p.lastUpdated||''].join(",") + "\n";
+                    });
+                    const link = document.createElement("a");
+                    link.setAttribute("href", encodeURI(csvContent));
+                    link.setAttribute("download", `金魚場巡視記錄_${new Date().toISOString().slice(0,10)}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                },
+
+                exportJSON() {
+                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.allPondsFlatList, null, 2));
+                    const link = document.createElement('a');
+                    link.setAttribute("href", dataStr);
+                    link.setAttribute("download", `goldfish_farm_backup_${new Date().toISOString().slice(0,10)}.json`);
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                },
+
+                initChart() {
+                    const canvas = document.getElementById('statusChart');
+                    if (!canvas) return;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) return;
+                    if (this.chartInstance) this.chartInstance.destroy();
+
+                    const st = this.stats;
+                    this.chartInstance = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['正常養殖', '籃子有魚', '空池有水', '空池無水', '警戒/異常', '未記錄'],
+                            datasets: [{
+                                data: [st.NORMAL, st.BASKET, st.EMPTY_WATER, st.EMPTY_NO_WATER, st.WARNING + st.DANGER, st.UNRECORDED],
+                                backgroundColor: ['#34d399', '#c084fc', '#7dd3fc', '#e7e5e4', '#f59e0b', '#cbd5e1'],
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            cutout: '68%'
+                        }
+                    });
+                },
+
+                updateChart() {
+                    if (!this.chartInstance) { this.initChart(); return; }
+                    const st = this.stats;
+                    this.chartInstance.data.datasets[0].data = [st.NORMAL, st.BASKET, st.EMPTY_WATER, st.EMPTY_NO_WATER, st.WARNING + st.DANGER, st.UNRECORDED];
+                    this.chartInstance.update();
+                }
+            };
+        }
+    </script>
+</body>
+</html>
