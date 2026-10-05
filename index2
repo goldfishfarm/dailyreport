@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+    <title>金魚場巡視 · 池況記錄與對照圖系統</title>
+    <meta name="theme-color" content="#ea580c"/>
+    <meta name="mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+    <meta name="apple-mobile-web-app-title" content="金魚場巡視"/>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: { 50: '#fff7ed', 100: '#ffedd5', 500: '#f97316', 600: '#ea580c', 700: '#c2410c' }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Alpine.js & Lucide Icons & Chart.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        [x-cloak] { display: none !important; }
+        .pond-btn { transition: all 0.15s ease-in-out; user-select: none; }
+        .pond-btn:active { transform: scale(0.92); }
+    </style>
+
+    <script>
+        // =====================================================================
+        // ⚙️【設定區】請將下方引號內的網址替換為您的 Google Apps Script 網頁應用程式 URL
+        // =====================================================================
+        const GOOGLE_SCRIPT_URL = https://script.google.com/macros/s/AKfycbydNhwJrmw3XM40YCO4YFeuiKXFxgn3ARyZgIj5nb1bBIAN7fvvLPc9PaEUjzicvfKl/exec;
+    </script>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen flex flex-col font-sans" x-data="goldfishApp()" x-init="initApp()">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-40 bg-gradient-to-r from-orange-600 via-amber-600 to-teal-700 text-white shadow-md">
+        <div class="mx-auto flex max-w-[1600px] items-center justify-between px-3 py-2.5">
+            <div class="flex items-center gap-2">
+                <div class="rounded-lg bg-white/20 p-2 backdrop-blur-sm flex items-center justify-center">
+                    <i data-lucide="fish" class="h-6 w-6 text-amber-200"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold leading-tight md:text-lg flex items-center gap-2">
+                        金魚場全場巡視系統
+                        <span class="text-[10px] bg-amber-400/30 text-amber-100 px-2 py-0.5 rounded-full font-normal hidden sm:inline-block">Google 試算表同步版</span>
+                    </h1>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2 text-xs">
+                <!-- 雲端同步按鈕 -->
+                <div class="flex gap-1">
+                    <button @click="syncToCloud()" :disabled="isSyncing" class="flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 font-semibold text-white shadow hover:bg-blue-500 transition active:scale-95 disabled:opacity-50">
+                        <i data-lucide="cloud-upload" class="h-4 w-4"></i>
+                        <span class="hidden md:inline" x-text="isSyncing ? '同步中...' : '同步至雲端'"></span>
+                    </button>
+                    <button @click="loadFromCloud()" :disabled="isSyncing" class="flex items-center gap-1 rounded-lg bg-teal-600 px-2.5 py-1.5 font-semibold text-white shadow hover:bg-teal-500 transition active:scale-95 disabled:opacity-50">
+                        <i data-lucide="cloud-download" class="h-4 w-4"></i>
+                        <span class="hidden md:inline">載入雲端</span>
+                    </button>
+                </div>
+
+                <div class="bg-black/20 p-1 rounded-lg flex gap-1">
+                    <button @click="viewMode = 'blueprint'" :class="viewMode === 'blueprint' ? 'bg-white text-slate-800 font-bold shadow' : 'text-white hover:bg-white/10'" class="px-2.5 py-1 rounded-md transition flex items-center gap-1 text-[11px]">
+                        <i data-lucide="map" class="h-3.5 w-3.5"></i>
+                        <span>平面圖視角</span>
+                    </button>
+                    <button @click="viewMode = 'grid'" :class="viewMode === 'grid' ? 'bg-white text-slate-800 font-bold shadow' : 'text-white hover:bg-white/10'" class="px-2.5 py-1 rounded-md transition flex items-center gap-1 text-[11px]">
+                        <i data-lucide="layout-grid" class="h-3.5 w-3.5"></i>
+                        <span>區域列表</span>
+                    </button>
+                </div>
+
+                <button @click="openQuickBatchModal()" class="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 font-semibold text-white shadow hover:bg-emerald-500 transition active:scale-95">
+                    <i data-lucide="zap" class="h-4 w-4"></i>
+                    <span class="hidden md:inline">逐池巡邏</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Stats Bar -->
+    <section class="border-b border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <div class="mx-auto grid max-w-[1600px] grid-cols-3 gap-1.5 text-center text-xs md:grid-cols-7">
+            <button @click="selectedStatusFilter = 'ALL'" :class="selectedStatusFilter === 'ALL' ? 'ring-2 ring-slate-400 bg-slate-100' : 'bg-slate-50 border-slate-200'" class="rounded-lg border p-1.5 text-slate-800 transition hover:bg-slate-100">
+                <div class="text-[10px] font-medium opacity-80">全場池數</div>
+                <div class="text-sm font-bold" x-text="totalPondsCount">253</div>
+            </button>
+            <button @click="toggleStatusFilter('NORMAL')" :class="selectedStatusFilter === 'NORMAL' ? 'ring-2 ring-emerald-500 bg-emerald-100' : 'bg-emerald-50 border-emerald-200 text-emerald-800'" class="rounded-lg border p-1.5 transition hover:bg-emerald-100">
+                <div class="text-[10px] font-medium opacity-80">🟢 正常養殖</div>
+                <div class="text-sm font-bold" x-text="stats.NORMAL || 0">0</div>
+            </button>
+            <button @click="toggleStatusFilter('BASKET')" :class="selectedStatusFilter === 'BASKET' ? 'ring-2 ring-purple-500 bg-purple-100' : 'bg-purple-50 border-purple-200 text-purple-800'" class="rounded-lg border p-1.5 transition hover:bg-purple-100">
+                <div class="text-[10px] font-medium opacity-80">🟣 籃子有魚</div>
+                <div class="text-sm font-bold" x-text="stats.BASKET || 0">0</div>
+            </button>
+            <button @click="toggleStatusFilter('EMPTY_WATER')" :class="selectedStatusFilter === 'EMPTY_WATER' ? 'ring-2 ring-sky-500 bg-sky-100' : 'bg-sky-50 border-sky-200 text-sky-800'" class="rounded-lg border p-1.5 transition hover:bg-sky-100">
+                <div class="text-[10px] font-medium opacity-80">🔵 空池有水</div>
+                <div class="text-sm font-bold" x-text="stats.EMPTY_WATER || 0">0</div>
+            </button>
+            <button @click="toggleStatusFilter('EMPTY_NO_WATER')" :class="selectedStatusFilter === 'EMPTY_NO_WATER' ? 'ring-2 ring-stone-400 bg-stone-100' : 'bg-stone-50 border-stone-200 text-stone-800'" class="rounded-lg border p-1.5 transition hover:bg-stone-100">
+                <div class="text-[10px] font-medium opacity-80">⚪ 空池無水</div>
+                <div class="text-sm font-bold" x-text="stats.EMPTY_NO_WATER || 0">0</div>
+            </button>
+            <button @click="toggleStatusFilter('WARNING')" :class="selectedStatusFilter === 'WARNING' ? 'ring-2 ring-amber-500 bg-amber-100' : 'bg-amber-50 border-amber-200 text-amber-800'" class="rounded-lg border p-1.5 transition hover:bg-amber-100">
+                <div class="text-[10px] font-medium opacity-80">🟡 警戒/🔴 異常</div>
+                <div class="text-sm font-bold" x-text="(stats.WARNING || 0) + (stats.DANGER || 0)">0</div>
+            </button>
+            <button @click="openDeadFishModal()" class="rounded-lg border p-1.5 bg-rose-50 border-rose-200 text-rose-700 transition hover:bg-rose-100 col-span-3 md:col-span-1">
+                <div class="text-[10px] font-medium opacity-80">💀 今日死魚</div>
+                <div class="text-sm font-bold"><span x-text="totalDeadFishToday">0</span> 尾</div>
+            </button>
+        </div>
+    </section>
+
+    <!-- Main Content Area -->
+    <main class="mx-auto grid w-full max-w-[1600px] flex-1 grid-cols-1 gap-3 p-2 sm:p-3 lg:grid-cols-12">
+        <div class="flex min-w-0 flex-col gap-2.5 lg:col-span-9">
+            
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+                <div class="custom-scrollbar flex items-center gap-2 overflow-x-auto text-[11px]">
+                    <span class="font-bold text-slate-500 whitespace-nowrap">圖例：</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-emerald-400"></span> 正常</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-purple-400"></span> 籠養</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-sky-300"></span> 有水</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-stone-200"></span> 無水</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-amber-300"></span> 警戒</span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="h-2.5 w-2.5 rounded bg-rose-500"></span> 異常</span>
+                </div>
+                <div class="relative w-full sm:w-48">
+                    <input type="text" x-model="searchQuery" placeholder="搜尋池號 (例: F右08)" class="w-full rounded-lg border border-slate-300 bg-slate-50 py-1 pl-7 pr-2 text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-orange-500 transition"/>
+                    <i data-lucide="search" class="absolute left-2 top-1.5 h-3.5 w-3.5 text-slate-400"></i>
+                </div>
+            </div>
+
+            <!-- Blueprint View -->
+            <div x-show="viewMode === 'blueprint'" class="rounded-xl border border-slate-300 bg-slate-200/60 p-2 sm:p-3 shadow-inner custom-scrollbar overflow-x-auto">
+                <div class="min-w-[1020px] space-y-4">
+                    <div class="grid grid-cols-12 gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-300 shadow-sm">
+                        <!-- F區 -->
+                        <div class="col-span-2 border-r border-slate-300 pr-2 flex flex-col justify-between">
+                            <div class="text-[11px] font-extrabold text-slate-700 mb-1 border-b pb-0.5">F區</div>
+                            <div class="space-y-1">
+                                <template x-for="id in fRightList" :key="id">
+                                    <button @click="clickPondById(id)" :class="getPondBtnClass(id)" class="pond-btn w-full h-6 rounded text-[10px] font-bold flex items-center justify-between px-1.5 border">
+                                        <span x-text="id"></span>
+                                        <span class="text-[8px] opacity-80" x-text="getPondSub(id)"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <div class="space-y-1 mt-3">
+                                <template x-for="id in fLeftList" :key="id">
+                                    <button @click="clickPondById(id)" :class="getPondBtnClass(id)" class="pond-btn w-full h-6 rounded text-[10px] font-bold flex items-center justify-between px-1.5 border">
+                                        <span x-text="id"></span>
+                                        <span class="text-[8px] opacity-80" x-text="getPondSub(id)"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                        <!-- G區 & H區 -->
+                        <div class="col-span-3 border-r border-slate-300 pr-2 space-y-2">
+                            <div class="flex gap-2">
+                                <div class="flex-1 space-y-1">
+                                    <div class="text-[11px] font-extrabold text-teal-800 border-b pb-0.5">G區</div>
+                                    <template x-for="num in gNums" :key="'G'+num">
+                                        <div class="grid grid-cols-2 gap-0.5">
+                                            <button @click="clickPondById('G左'+num)" :class="getPondBtnClass('G左'+num)" class="pond-btn h-6 rounded text-[9px] font-bold border truncate text-center" x-text="'G左'+num"></button>
+                                            <button @click="clickPondById('G右'+num)" :class="getPondBtnClass('G右'+num)" class="pond-btn h-6 rounded text-[9px] font-bold border truncate text-center" x-text="'G右'+num"></button>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="flex-1 space-y-1">
+                                    <div class="text-[11px] font-extrabold text-teal-800 border-b pb-0.5">H區</div>
+                                    <template x-for="num in hNums" :key="'H'+num">
+                                        <div class="grid grid-cols-2 gap-0.5">
+                                            <button @click="clickPondById('H左'+num)" :class="getPondBtnClass('H左'+num)" class="pond-btn h-6 rounded text-[9px] font-bold border truncate text-center" x-text="'H左'+num"></button>
+                                            <button @click="clickPondById('H右'+num)" :class="getPondBtnClass('H右'+num)" class="pond-btn h-6 rounded text-[9px] font-bold border truncate text-center" x-text="'H右'+num"></button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 簡易提示：點擊任意方塊即可填報 -->
+                        <div class="col-span-7 flex items-center justify-center p-4 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-slate-500 text-xs">
+                            💡 提示：點擊上方地圖上的任一池號方塊，即可開啟該池的詳細填報視窗！
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Grid View -->
+            <div x-show="viewMode === 'grid'" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <template x-for="zone in visibleZones" :key="zone.name">
+                        <section class="rounded-xl border border-slate-200 bg-slate-50/50 p-2.5">
+                            <header class="mb-2 flex items-center justify-between border-b pb-1">
+                                <h3 class="text-xs font-bold text-slate-800" x-text="zone.name"></h3>
+                                <span class="text-[10px] bg-slate-200 px-1.5 py-0.5 rounded text-slate-600" x-text="`${zone.ponds.length} 池`"></span>
+                            </header>
+                            <div class="flex flex-wrap gap-1.5">
+                                <template x-for="pond in zone.ponds" :key="pond.id">
+                                    <button @click="openPondModal(pond)" :class="getPondButtonClass(pond)" class="relative shrink-0 w-11 h-9 rounded text-[10px] font-bold flex flex-col items-center justify-center p-0.5 border">
+                                        <span x-text="pond.id"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </section>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Side Panel -->
+        <div class="flex min-w-0 flex-col gap-3 lg:col-span-3">
+            <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <h3 class="text-xs font-bold text-slate-700 mb-2">池況完成度統計</h3>
+                <div class="h-32 relative">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Inspection Modal -->
+    <div x-show="showPondModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-sm" x-transition.opacity>
+        <div @click.outside="showPondModal = false" class="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-100 overflow-hidden flex flex-col">
+            <div class="bg-gradient-to-r from-orange-600 to-amber-600 px-4 py-3 text-white flex items-center justify-between">
+                <h2 class="text-base font-bold flex items-center gap-2">
+                    <span x-text="activePond ? activePond.id : ''" class="text-xl"></span>
+                    <span class="text-xs bg-white/20 font-normal px-2 py-0.5 rounded-full" x-text="activePond ? activePond.zone : ''"></span>
+                </h2>
+                <button @click="showPondModal = false" class="rounded-lg p-1 text-white/80 hover:bg-white/20"><i data-lucide="x" class="h-5 w-5"></i></button>
+            </div>
+
+            <div x-if="activePond" class="p-4 space-y-3.5 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">1. 池況類別標籤</label>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <template x-for="st in statusOptions" :key="st.key">
+                            <button type="button" @click="activePondForm.status = st.key"
+                                    :class="activePondForm.status === st.key ? st.activeClass + ' ring-2 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'"
+                                    class="p-1.5 rounded-lg border text-center transition">
+                                <span class="text-xs" x-text="st.icon"></span>
+                                <span class="text-[10px]" x-text="st.label"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">主要金魚品種</label>
+                        <input type="text" x-model="activePondForm.breed" placeholder="品種" class="w-full rounded-lg border border-slate-300 p-1.5 text-xs"/>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">估算數量 (尾)</label>
+                        <input type="number" min="0" x-model.number="activePondForm.fishCount" class="w-full rounded-lg border border-slate-300 p-1.5 text-xs"/>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">巡視備註</label>
+                    <textarea x-model="activePondForm.notes" rows="2" class="w-full rounded-lg border border-slate-300 p-1.5 text-xs"></textarea>
+                </div>
+            </div>
+
+            <div class="bg-slate-50 border-t border-slate-200 px-4 py-2.5 flex justify-end gap-2">
+                <button type="button" @click="showPondModal = false" class="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium">取消</button>
+                <button type="button" @click="savePondInspection()" class="px-4 py-1.5 rounded-lg bg-orange-600 font-bold text-white shadow">儲存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script Logic -->
+    <script>
+        function goldfishApp() {
+            return {
+                viewMode: 'blueprint',
+                selectedStatusFilter: 'ALL',
+                searchQuery: '',
+                showPondModal: false,
+                isSyncing: false,
+                activePond: null,
+                activePondForm: { status: 'NORMAL', breed: '', fishCount: 0, hasBasket: false, deadCount: 0, notes: '' },
+
+                fRightList: ['F右11','F右10','F右09','F右08','F右07','F右06','F右05','F右04','F右03','F右02','F右01'],
+                fLeftList: ['F左01','F左02','F左03','F左04','F左05','F左06','F左07','F左08','F左09','F左10'],
+                gNums: ['13','12','11','10','09','08','07','06','05','04','03','02','01'],
+                hNums: ['11','10','09','08','07','06','05','04','03','02','01'],
+
+                statusOptions: [
+                    { key: 'NORMAL', label: '正常養殖', icon: '🟢', activeClass: 'bg-emerald-100 border-emerald-400 text-emerald-900' },
+                    { key: 'BASKET', label: '籃子有魚', icon: '🟣', activeClass: 'bg-purple-100 border-purple-400 text-purple-900' },
+                    { key: 'EMPTY_WATER', label: '空池有水', icon: '🔵', activeClass: 'bg-sky-100 border-sky-400 text-sky-900' },
+                    { key: 'EMPTY_NO_WATER', label: '空池無水', icon: '⚪', activeClass: 'bg-stone-200 border-stone-400 text-stone-900' },
+                    { key: 'WARNING', label: '警戒觀察', icon: '🟡', activeClass: 'bg-amber-100 border-amber-400 text-amber-900' },
+                    { key: 'DANGER', label: '異常處理', icon: '🔴', activeClass: 'bg-rose-100 border-rose-400 text-rose-900' },
+                ],
+
+                zones: [],
+                pondMap: new Map(),
+                logs: [],
+                chartInstance: null,
+
+                initApp() {
+                    this.buildBlueprintPonds();
+                    this.loadFromLocalStorage();
+                    this.$nextTick(() => { lucide.createIcons(); this.initChart(); });
+                },
+
+                buildBlueprintPonds() {
+                    const zonesConfig = [
+                        { name: 'F區', ids: [...this.fRightList, ...this.fLeftList] },
+                        { name: 'G區', ids: this.gNums.flatMap(n => ['G左'+n, 'G右'+n]) },
+                        { name: 'H區', ids: this.hNums.flatMap(n => ['H左'+n, 'H右'+n]) }
+                    ];
+                    this.pondMap.clear();
+                    this.zones = zonesConfig.map(z => ({
+                        name: z.name,
+                        ponds: z.ids.map(id => {
+                            const p = { id, zone: z.name, status: '', breed: '', fishCount: 0, hasBasket: false, deadCount: 0, notes: '', lastUpdated: null };
+                            this.pondMap.set(id, p);
+                            return p;
+                        })
+                    }));
+                },
+
+                get allPondsFlatList() {
+                    return this.zones.flatMap(z => z.ponds);
+                },
+
+                get totalPondsCount() { return this.allPondsFlatList.length; },
+                
+                get stats() {
+                    const res = { NORMAL: 0, BASKET: 0, EMPTY_WATER: 0, EMPTY_NO_WATER: 0, WARNING: 0, DANGER: 0, UNRECORDED: 0 };
+                    this.allPondsFlatList.forEach(p => {
+                        if (p.status && res[p.status] !== undefined) res[p.status]++;
+                        else res.UNRECORDED++;
+                    });
+                    return res;
+                },
+
+                get totalDeadFishToday() {
+                    return this.allPondsFlatList.reduce((sum, p) => sum + (p.deadCount || 0), 0);
+                },
+
+                get visibleZones() {
+                    return this.zones;
+                },
+
+                getPondBtnClass(id) {
+                    const p = this.pondMap.get(id);
+                    if (!p || !p.status) return 'border-dashed border-slate-300 bg-white/90 text-slate-600';
+                    switch (p.status) {
+                        case 'NORMAL': return 'bg-emerald-400 border-emerald-500 text-slate-900 font-extrabold';
+                        case 'BASKET': return 'bg-purple-400 border-purple-500 text-slate-900 font-extrabold';
+                        case 'EMPTY_WATER': return 'bg-sky-300 border-sky-400 text-slate-900';
+                        case 'EMPTY_NO_WATER': return 'bg-stone-200 border-stone-300 text-slate-600';
+                        case 'WARNING': return 'bg-amber-300 border-amber-400 text-slate-900 font-bold';
+                        case 'DANGER': return 'bg-rose-500 border-rose-600 text-white font-bold';
+                        default: return 'bg-white border-slate-200 text-slate-600';
+                    }
+                },
+
+                getPondButtonClass(pond) { return this.getPondBtnClass(pond ? pond.id : ''); },
+                getPondSub(id) {
+                    const p = this.pondMap.get(id);
+                    return p && p.deadCount > 0 ? `💀${p.deadCount}` : (p?.hasBasket ? '網籃' : '');
+                },
+                clickPondById(id) { const p = this.pondMap.get(id); if (p) this.openPondModal(p); },
+                toggleStatusFilter(st) { this.selectedStatusFilter = (this.selectedStatusFilter === st) ? 'ALL' : st; },
+
+                openPondModal(p) {
+                    this.activePond = p;
+                    this.activePondForm = { status: p.status || 'NORMAL', breed: p.breed || '', fishCount: p.fishCount || 0, hasBasket: !!p.hasBasket, deadCount: p.deadCount || 0, notes: p.notes || '' };
+                    this.showPondModal = true;
+                },
+
+                savePondInspection() {
+                    if (!this.activePond) return;
+                    Object.assign(this.activePond, { ...this.activePondForm, lastUpdated: new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) });
+                    this.saveToLocalStorage();
+                    this.updateChart();
+                    this.showPondModal = false;
+                },
+
+                saveToLocalStorage() {
+                    localStorage.setItem('goldfish_blueprint_data_v3', JSON.stringify({ ponds: this.allPondsFlatList, logs: this.logs }));
+                },
+
+                loadFromLocalStorage() {
+                    const saved = localStorage.getItem('goldfish_blueprint_data_v3');
+                    if (saved) {
+                        try {
+                            const parsed = JSON.parse(saved);
+                            parsed.ponds?.forEach(p => { if (this.pondMap.has(p.id)) Object.assign(this.pondMap.get(p.id), p); });
+                        } catch (e) { console.error(e); }
+                    }
+                },
+
+                // 🌐 Google 試算表同步功能
+                async syncToCloud() {
+                    if (GOOGLE_SCRIPT_URL.includes("您的Google指令碼ID")) {
+                        alert("請先將程式碼頂端的 GOOGLE_SCRIPT_URL 替換為您的 Apps Script 網址！");
+                        return;
+                    }
+                    this.isSyncing = true;
+                    try {
+                        await fetch(GOOGLE_SCRIPT_URL, {
+                            method: "POST",
+                            mode: "no-cors",
+                            headers: { "Content-Type": "text/plain;charset=utf-8" },
+                            body: JSON.stringify(this.allPondsFlatList)
+                        });
+                        alert("成功同步資料至 Google 試算表！");
+                    } catch (error) {
+                        alert("同步至雲端失敗。");
+                    } finally {
+                        this.isSyncing = false;
+                    }
+                },
+
+                async loadFromCloud() {
+                    if (GOOGLE_SCRIPT_URL.includes("您的Google指令碼ID")) {
+                        alert("請先將程式碼頂端的 GOOGLE_SCRIPT_URL 替換為您的 Apps Script 網址！");
+                        return;
+                    }
+                    this.isSyncing = true;
+                    try {
+                        const response = await fetch(GOOGLE_SCRIPT_URL);
+                        const data = await response.json();
+                        if (Array.isArray(data)) {
+                            data.forEach(item => {
+                                const p = this.pondMap.get(item["池號"]);
+                                if (p) {
+                                    const statusMap = { '正常養殖': 'NORMAL', '籃子有魚': 'BASKET', '空池有水': 'EMPTY_WATER', '空池無水': 'EMPTY_NO_WATER', '警戒觀察': 'WARNING', '異常處理': 'DANGER' };
+                                    p.status = statusMap[item["池況"]] || '';
+                                    p.breed = item["品種"] || '';
+                                    p.fishCount = Number(item["估算數量"]) || 0;
+                                    p.hasBasket = item["網籃籠養"] === '是';
+                                    p.deadCount = Number(item["死魚數"]) || 0;
+                                    p.notes = item["備註"] || '';
+                                }
+                            });
+                            this.saveToLocalStorage();
+                            this.updateChart();
+                            alert("成功從 Google 試算表載入資料！");
+                        }
+                    } catch (error) {
+                        alert("從雲端載入失敗。");
+                    } finally {
+                        this.isSyncing = false;
+                    }
+                },
+
+                initChart() {
+                    const ctx = document.getElementById('statusChart')?.getContext('2d');
+                    if (!ctx) return;
+                    if (this.chartInstance) this.chartInstance.destroy();
+                    const st = this.stats;
+                    this.chartInstance = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['正常', '籠養', '有水', '無水', '警戒/異常', '未記錄'],
+                            datasets: [{ data: [st.NORMAL, st.BASKET, st.EMPTY_WATER, st.EMPTY_NO_WATER, st.WARNING + st.DANGER, st.UNRECORDED], backgroundColor: ['#34d399', '#c084fc', '#7dd3fc', '#e7e5e4', '#f59e0b', '#cbd5e1'] }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, cutout: '68%' }
+                    });
+                },
+
+                updateChart() {
+                    if (!this.chartInstance) { this.initChart(); return; }
+                    const st = this.stats;
+                    this.chartInstance.data.datasets[0].data = [st.NORMAL, st.BASKET, st.EMPTY_WATER, st.EMPTY_NO_WATER, st.WARNING + st.DANGER, st.UNRECORDED];
+                    this.chartInstance.update();
+                }
+            };
+        }
+    </script>
+</body>
+</html>
